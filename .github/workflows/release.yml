@@ -1,0 +1,46 @@
+name: release
+
+# Publishing is driven by a tag, so the released artifact always corresponds to a commit
+# that exists in this repository.
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Required for npm trusted publishing: the OIDC token is the credential. No npm
+      # token is stored anywhere — not in secrets, not on a laptop.
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      # A tag that disagrees with package.json means someone tagged the wrong commit.
+      # Catching it here costs a minute; catching it after publish costs a version number,
+      # because npm will not let that version be republished.
+      - name: tag matches package.json version
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG="$(node -p "require('./package.json').version")"
+          if [ "$TAG" != "$PKG" ]; then
+            echo "tag $GITHUB_REF_NAME says $TAG, package.json says $PKG"
+            exit 1
+          fi
+
+      - run: npm ci
+      - run: npm test
+      - run: node bin/sparepack.mjs --help
+
+      # Trusted publishing needs npm >= 11.5.1; setup-node still ships 10.x with Node 22.
+      - run: npm install -g npm@latest
+
+      # No --provenance flag and no NODE_AUTH_TOKEN: trusted publishing supplies both the
+      # credential and the attestation. Requires the trusted publisher to be configured
+      # once on npmjs.com (package → Settings → Trusted publisher → this repo, release.yml).
+      - run: npm publish

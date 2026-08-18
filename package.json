@@ -31,7 +31,6 @@
   ],
   "publishConfig": {
     "access": "public",
-    "tag": "beta",
     "registry": "https://registry.npmjs.org/"
   },
   "scripts": {
