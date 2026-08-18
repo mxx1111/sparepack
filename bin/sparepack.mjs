@@ -226,9 +226,14 @@ async function main() {
   const { opts, positional } = parsed
   const command = positional[0]
 
-  if (opts.help || !command) {
+  // Asking for help is a successful use of the tool; being given no command is not.
+  if (opts.help) {
     console.log(USAGE)
-    return command ? 0 : 1
+    return 0
+  }
+  if (!command) {
+    console.log(USAGE)
+    return 1
   }
 
   switch (command) {

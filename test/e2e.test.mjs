@@ -303,6 +303,24 @@ test('verify rejects a directory that is not a pack', async (t) => {
   assert.match(result.stderr, /does not look like a sparepack/)
 })
 
+test('--help succeeds, no command does not', async (t) => {
+  // prepublishOnly runs `sparepack --help` as a smoke test, so its exit code has to mean
+  // what it says: asking for help is a successful use of the tool, being given nothing is not.
+  const root = await mkdtemp(join(tmpdir(), 'sparepack-help-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+
+  const help = await cli(root, ['--help'])
+  assert.equal(help.code, 0)
+  assert.match(help.stdout, /sparepack — turn a slice of a private repo/)
+
+  const bare = await cli(root, [])
+  assert.equal(bare.code, 1, 'no command is a usage error')
+
+  const bogus = await cli(root, ['frobnicate'])
+  assert.equal(bogus.code, 1)
+  assert.match(bogus.stderr, /unknown command/)
+})
+
 test('init writes a template and refuses to clobber an existing config', async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'sparepack-init-'))
   t.after(() => rm(root, { recursive: true, force: true }))
