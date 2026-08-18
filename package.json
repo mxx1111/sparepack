@@ -1,13 +1,12 @@
 {
   "name": "sparepack",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Turn a slice of a private repository into a shareable task pack: contracts and tests, no business logic",
   "type": "module",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/mxx1111/spare-cycles.git",
-    "directory": "packages/sparepack"
+    "url": "git+https://github.com/mxx1111/sparepack.git"
   },
   "keywords": [
     "redaction",
@@ -41,5 +40,9 @@
   "dependencies": {
     "typescript": "^5.9.0",
     "yaml": "^2.8.0"
+  },
+  "homepage": "https://github.com/mxx1111/sparepack#readme",
+  "bugs": {
+    "url": "https://github.com/mxx1111/sparepack/issues"
   }
 }

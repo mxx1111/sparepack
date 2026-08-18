@@ -1,0 +1,16 @@
+node_modules/
+*.log
+.DS_Store
+
+# Never commit anything that looks like a credential.
+*.credentials.json
+auth.json
+*.pem
+*.key
+
+# sparepack working directories hold pre-redaction extracts
+.sparepack/
+*.sparepack.tmp/
+*.balances.json
+sparepack-out/
+*.tgz

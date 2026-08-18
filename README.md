@@ -175,8 +175,21 @@ makes that review possible.
 npm install -g sparepack
 ```
 
-Node 22 or newer. Part of [spare-cycles](https://github.com/mxx1111/spare-cycles), but useful
-on its own — you do not need a task board to want to ask for help without handing over your
-codebase.
+Node 22 or newer, no other prerequisites.
+
+## Status
+
+Early. The test suite is thorough — 80 tests, including an end-to-end run against a repo
+seeded with credentials, customer records, and internal hostnames that must not escape — but
+**almost nobody has used this on their own code yet.** Two real leaks were caught by those
+tests during development, and the odds of a third existing are not small.
+
+Treat the manifest review as the thing keeping you safe, not the tool. If you find a case it
+gets wrong, [open an issue](https://github.com/mxx1111/sparepack/issues) — that is the most
+useful thing you can do with it right now.
+
+Built for [spare-cycles](https://github.com/mxx1111/spare-cycles), a mutual-aid task board,
+but useful on its own: you do not need a task board to want help with your code without
+handing over the codebase.
 
 MIT.
