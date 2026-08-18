@@ -177,6 +177,15 @@ npm install -g sparepack
 
 Node 22 or newer, no other prerequisites.
 
+**Working through an AI agent?** Paste it this line, verbatim:
+
+> Read https://github.com/mxx1111/sparepack#readme, then run `npx sparepack init` in my repo and help me fill sparepack.yaml. The final `publish` confirmation at pack time is mine to type, never yours.
+
+The last clause is not politeness. The pre-write confirmation is the tool's entire safety
+model, and an agent that types it for you has dismantled it. An agent is welcome to write
+the config, read the manifest aloud, and flag anything suspicious — the one thing it must
+never do is answer the question that is addressed to you.
+
 ## Status
 
 Early. The test suite is thorough — 80 tests, including an end-to-end run against a repo
