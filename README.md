@@ -101,7 +101,13 @@ fixtures:                      # real structure, synthetic values
 redact:                        # names the scanner cannot know about
   - pattern: "acme-corp|ACME"
     replace: "example-org"
+
+stripPrefix: packages/api/     # strip this from every path inside the pack
 ```
+
+**Destination path remapping (`stripPrefix`).** Packing from a monorepo root otherwise gives
+you `packages/api/src/...` inside the pack. Setting `stripPrefix` strips that leading directory
+prefix from destination paths inside the pack so the receiver gets clean paths like `src/...`.
 
 **Fixture generators.** `shape[:n]` reads the real JSON and rebuilds it with the same keys and
 nesting but fake values, capping arrays at `n` elements. `rows:n` keeps a delimited file's
