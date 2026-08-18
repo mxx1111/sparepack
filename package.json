@@ -1,0 +1,38 @@
+{
+  "name": "sparepack",
+  "version": "0.1.0",
+  "description": "Turn a slice of a private repository into a shareable task pack: contracts and tests, no business logic",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mxx1111/spare-cycles.git",
+    "directory": "packages/sparepack"
+  },
+  "keywords": [
+    "redaction",
+    "anonymization",
+    "outsourcing",
+    "privacy",
+    "code-review",
+    "secrets-scanning"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "sparepack": "bin/sparepack.mjs"
+  },
+  "files": [
+    "bin",
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "typescript": "^5.9.0",
+    "yaml": "^2.8.0"
+  }
+}
