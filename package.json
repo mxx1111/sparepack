@@ -31,7 +31,8 @@
   ],
   "publishConfig": {
     "access": "public",
-    "tag": "beta"
+    "tag": "beta",
+    "registry": "https://registry.npmjs.org/"
   },
   "scripts": {
     "test": "node --test test/*.test.mjs",
