@@ -64,6 +64,18 @@ async function readIfExists(path) {
  * Build the pack in memory.
  * @returns {{files: Array, findings: Array, suppressed: Array, warnings: string[]}}
  */
+export function computeDestPath(sourcePath, stripPrefix) {
+  if (!stripPrefix) return sourcePath
+  if (sourcePath.startsWith(stripPrefix)) {
+    const stripped = sourcePath.slice(stripPrefix.length)
+    if (!stripped || stripped.startsWith('..') || stripped.startsWith('/')) {
+      throw new Error(`stripPrefix "${stripPrefix}" on "${sourcePath}" produces invalid pack path "${stripped}"`)
+    }
+    return stripped
+  }
+  return null
+}
+
 export async function buildPack(root, config) {
   const files = []
   const warnings = [...(config.warnings ?? [])]
@@ -130,6 +142,32 @@ export async function buildPack(root, config) {
     })
   }
 
+
+  // Apply stripPrefix and check for collisions / non-matches
+  if (config.stripPrefix) {
+    let matchCount = 0
+    const destPaths = new Map()
+    for (const file of files) {
+      const dest = computeDestPath(file.path, config.stripPrefix)
+      if (dest !== null) {
+        matchCount++
+        file.destPath = dest
+      } else {
+        file.destPath = file.path
+      }
+      // Check collision against ALL previously assigned dest paths
+      if (destPaths.has(file.destPath)) {
+        throw new Error(`stripPrefix collision: "${file.path}" and "${destPaths.get(file.destPath)}" both map to "${file.destPath}"`)
+      }
+      destPaths.set(file.destPath, file.path)
+    }
+    if (matchCount === 0) {
+      throw new Error(`stripPrefix "${config.stripPrefix}" matched no files in the pack`)
+    }
+  } else {
+    for (const file of files) file.destPath = file.path
+  }
+
   // Redact first, then scan. Scanning before redaction would report findings the author
   // already handled; scanning after is the only way to know the redactions were enough.
   const findings = []
@@ -155,7 +193,7 @@ export function buildManifest(config, { files, findings, suppressed, warnings })
       bytes: files.reduce((n, f) => n + f.bytes, 0),
     },
     files: files.map((f) => ({
-      path: f.path,
+      path: f.destPath || f.path,
       kind: f.kind,
       bytes: f.bytes,
       ...(f.isTest ? { role: 'acceptance-test' } : {}),
@@ -328,7 +366,7 @@ export async function writePack(outDir, manifest, files) {
   await mkdir(out, { recursive: true })
 
   for (const file of files) {
-    const dest = join(out, file.path)
+    const dest = join(out, file.destPath || file.path)
     await mkdir(dirname(dest), { recursive: true })
     await writeFile(dest, file.source)
   }

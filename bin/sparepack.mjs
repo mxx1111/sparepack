@@ -74,6 +74,11 @@ redact:
 # Findings you have looked at and decided are fine. Format: rule-id:path[:line]
 # Do not add entries here to make the scanner quiet. Add them when you have read the
 # specific line and concluded it is genuinely safe to publish.
+
+# Strip a leading path prefix from every file's destination inside the pack.
+# Useful for monorepos where you pack from a subdirectory but want clean paths.
+# stripPrefix: "packages/api/"
+
 # allowFindings:
 #   - email:src/importer/types.ts:12
 

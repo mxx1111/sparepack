@@ -14,7 +14,7 @@ import { compileCustomRule } from './scan.mjs'
 export const CONFIG_NAMES = ['sparepack.yaml', 'sparepack.yml']
 
 const FILE_KEYS = ['include', 'interfaces', 'tests']
-const KNOWN_KEYS = new Set([...FILE_KEYS, 'task', 'fixtures', 'redact', 'scanRules', 'allowFindings', 'out'])
+const KNOWN_KEYS = new Set([...FILE_KEYS, 'task', 'fixtures', 'redact', 'scanRules', 'allowFindings', 'out', 'stripPrefix'])
 
 class ConfigError extends Error {}
 
@@ -117,6 +117,17 @@ export function parseConfig(text, { source = 'sparepack.yaml' } = {}) {
     fail('"task" is required: one line saying what this pack is for. The worker reads it first.')
   }
 
+  let stripPrefix = null
+  if (raw.stripPrefix !== undefined && raw.stripPrefix !== null) {
+    if (typeof raw.stripPrefix !== 'string' || !raw.stripPrefix.trim()) {
+      fail('"stripPrefix" must be a non-empty string')
+    }
+    stripPrefix = validatePattern(raw.stripPrefix, 'stripPrefix')
+    if (!stripPrefix.endsWith('/')) {
+      stripPrefix += '/'
+    }
+  }
+
   const config = {
     task: raw.task.trim(),
     out: typeof raw.out === 'string' && raw.out.trim() ? raw.out.trim() : 'sparepack-out',
@@ -126,6 +137,7 @@ export function parseConfig(text, { source = 'sparepack.yaml' } = {}) {
     fixtures: parseFixtures(raw.fixtures),
     redact: parseRedact(raw.redact),
     scanRules: asArray(raw.scanRules, 'scanRules').map(compileCustomRule),
+    stripPrefix,
     allowFindings: asArray(raw.allowFindings, 'allowFindings').map((entry, i) => {
       if (typeof entry !== 'string' || !entry.includes(':')) {
         fail(`allowFindings[${i}] must look like "rule-id:path" or "rule-id:path:line"`)
@@ -133,6 +145,8 @@ export function parseConfig(text, { source = 'sparepack.yaml' } = {}) {
       return entry
     }),
   }
+
+
 
   validatePattern(config.out, 'out')
 

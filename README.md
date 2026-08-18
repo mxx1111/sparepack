@@ -159,9 +159,10 @@ config, so a worker who clones the pack cannot run the tests until someone adds 
 practice you write a few lines of `package.json` by hand after packing. Worth knowing before
 you promise someone a pack they can `npm test` straight away.
 
-The paths in a pack mirror the paths in your repo, with no way to remap them. Run `sparepack`
-from the directory you want to be the pack's root — packing from a monorepo root gives you
-`packages/api/src/...` inside the pack, which is usually not what you want.
+The paths in a pack mirror the paths in your repo by default, but you can use `stripPrefix`
+to remove a leading directory path from the destination files. This is useful when packing
+from a monorepo root — setting `stripPrefix: "packages/api/"` will place the files at
+`src/...` inside the pack instead of `packages/api/src/...`.
 
 The scanner is lexical. It finds patterns, not meaning. A business rule written in prose in a
 comment, a customer name that looks like an ordinary word, an internal codename you forgot to
