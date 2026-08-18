@@ -71,6 +71,10 @@ redact:
 #     pattern: "\\\\b(billing|ledger)-internal\\\\b"
 #     severity: high
 
+# Strip a leading path prefix from destination paths inside the pack.
+# Useful when running from a monorepo root to avoid paths like "packages/api/src/...".
+# stripPrefix: packages/api/
+
 # Findings you have looked at and decided are fine. Format: rule-id:path[:line]
 # Do not add entries here to make the scanner quiet. Add them when you have read the
 # specific line and concluded it is genuinely safe to publish.

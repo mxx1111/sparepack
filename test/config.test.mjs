@@ -117,6 +117,18 @@ test('fixtures must map a relative path to a generator string', () => {
   bad(`${base}fixtures:\n  data/a.json: ""\n`, /non-empty generator/)
 })
 
+// --- stripPrefix ----------------------------------------------------------
+
+test('stripPrefix must be non-empty, relative, and not contain ..', () => {
+  bad(`${base}stripPrefix: ""\n`, /"stripPrefix" must be a non-empty string/)
+  bad(`${base}stripPrefix: "   "\n`, /"stripPrefix" must be a non-empty string/)
+  bad(`${base}stripPrefix: /abs/path\n`, /must be a relative path prefix/)
+  bad(`${base}stripPrefix: ../parent\n`, /must not contain "\.\."/)
+  bad(`${base}stripPrefix: foo/../bar\n`, /must not contain "\.\."/)
+  const config = parseConfig(`${base}stripPrefix: packages/api/\n`)
+  assert.equal(config.stripPrefix, 'packages/api/')
+})
+
 // --- defaults -------------------------------------------------------------
 
 test('out defaults to sparepack-out and must stay inside the repo', () => {

@@ -347,3 +347,94 @@ test('the generated template is itself a valid config', async (t) => {
   assert.equal(config.interfaces.length, 1)
   assert.equal(config.redact.length, 1)
 })
+
+test('stripPrefix remaps destination paths and verifies cleanly', async (t) => {
+  const root = await makeRepo()
+  t.after(() => rm(root, { recursive: true, force: true }))
+
+  // Configure stripPrefix: "src/billing" so src/billing/types.ts -> types.ts, etc.
+  const config = `task: "Add proportional refunds to the billing gateway"
+stripPrefix: src/billing/
+include:
+  - src/billing/types.ts
+interfaces:
+  - src/billing/gateway.ts
+tests:
+  - tests/billing/*.spec.ts
+fixtures:
+  data/customers.json: shape:2
+out: pack
+`
+  await writeFile(join(root, 'sparepack.yaml'), config)
+
+  const packed = await cli(root, ['pack', '--yes', '--no-color'])
+  assert.equal(packed.code, 0, `pack failed:\n${packed.stdout}\n${packed.stderr}`)
+
+  const { dir, files } = await readPack(root)
+
+  // Verify paths were remapped inside the pack
+  assert.ok(files['types.ts'], 'types.ts should be at pack root')
+  assert.ok(files['gateway.ts'], 'gateway.ts should be at pack root')
+  assert.ok(files['tests/billing/charge.spec.ts'], 'non-matching prefix paths remain untouched')
+  assert.ok(files['data/customers.json'])
+
+  // Verify MANIFEST.json matches remapped paths
+  const manifest = JSON.parse(await readFile(join(root, 'pack', 'MANIFEST.json'), 'utf8'))
+  const manifestPaths = manifest.files.map((f) => f.path)
+  assert.ok(manifestPaths.includes('types.ts'))
+  assert.ok(manifestPaths.includes('gateway.ts'))
+  assert.ok(manifestPaths.includes('tests/billing/charge.spec.ts'))
+
+  // Verify pack verify works on remapped pack
+  const verified = await cli(root, ['verify', dir])
+  assert.equal(verified.code, 0, `verify failed:\n${verified.stdout}\n${verified.stderr}`)
+  assert.match(verified.stdout, /No problems found/)
+})
+
+test('stripPrefix that matches no files is an error', async (t) => {
+  const root = await makeRepo()
+  t.after(() => rm(root, { recursive: true, force: true }))
+
+  const config = `task: "x"
+stripPrefix: non_existent_prefix/
+include:
+  - src/billing/types.ts
+out: pack
+`
+  await writeFile(join(root, 'sparepack.yaml'), config)
+
+  const result = await cli(root, ['pack', '--yes'])
+  assert.equal(result.code, 2)
+  assert.match(result.stderr, /"stripPrefix" pattern ".*" matched no files/)
+})
+
+test('stripPrefix collision is an error naming both paths', async (t) => {
+  const root = await makeRepo()
+  t.after(() => rm(root, { recursive: true, force: true }))
+
+  // Create two files: packages/a/foo.ts and packages/b/foo.ts
+  // If stripPrefix is packages/a, packages/a/foo.ts -> foo.ts. If there is already foo.ts included, they collide.
+  await writeFile(join(root, 'foo.ts'), 'export const a = 1\n')
+  const config = `task: "x"
+stripPrefix: src/billing
+include:
+  - foo.ts
+  - src/billing/foo.ts:
+`
+  // Actually let's create src/billing/foo.ts
+  await writeFile(join(root, 'src', 'billing', 'foo.ts'), 'export const b = 2\n')
+  const validConfig = `task: "x"
+stripPrefix: src/billing
+include:
+  - foo.ts
+  - src/billing/foo.ts
+out: pack
+`
+  await writeFile(join(root, 'sparepack.yaml'), validConfig)
+
+  const result = await cli(root, ['pack', '--yes'])
+  assert.equal(result.code, 2)
+  assert.match(result.stderr, /destination path collision after stripPrefix/)
+  assert.match(result.stderr, /foo\.ts/)
+  assert.match(result.stderr, /src\/billing\/foo\.ts/)
+})
