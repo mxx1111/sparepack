@@ -14,7 +14,7 @@ import { compileCustomRule } from './scan.mjs'
 export const CONFIG_NAMES = ['sparepack.yaml', 'sparepack.yml']
 
 const FILE_KEYS = ['include', 'interfaces', 'tests']
-const KNOWN_KEYS = new Set([...FILE_KEYS, 'task', 'fixtures', 'redact', 'scanRules', 'allowFindings', 'out'])
+const KNOWN_KEYS = new Set([...FILE_KEYS, 'task', 'fixtures', 'redact', 'scanRules', 'allowFindings', 'out', 'remap'])
 
 class ConfigError extends Error {}
 
@@ -81,6 +81,21 @@ function parseFixtures(raw) {
   if (typeof raw !== 'object' || Array.isArray(raw)) {
     fail('"fixtures" must be a mapping of path -> generator')
   }
+
+function parseRemap(raw) {
+  if (raw === undefined || raw === null) return []
+  if (!Array.isArray(raw)) fail('"remap" must be a list')
+  return raw.map((entry, i) => {
+    if (typeof entry !== 'object' || entry === null) fail('remap[' + i + '] must be a mapping with "from" and "to"')
+    if (typeof entry.from !== 'string' || !entry.from.trim()) fail('remap[' + i + '].from must be a non-empty string')
+    if (typeof entry.to !== 'string') fail('remap[' + i + '].to must be a string')
+    if (entry.from.split(/[\\/]/).includes('..')) fail('remap[' + i + '].from must not contain ".."')
+    var from = entry.from.replace(/[\\/]+$/, '') + '/'
+    var to = entry.to.replace(/[\\/]+$/, '') + '/'
+    return { from, to }
+  })
+}
+
   return Object.entries(raw).map(([path, spec]) => {
     validatePattern(path, 'fixtures')
     if (typeof spec !== 'string' || !spec.trim()) {
@@ -132,6 +147,7 @@ export function parseConfig(text, { source = 'sparepack.yaml' } = {}) {
       }
       return entry
     }),
+    remap: parseRemap(raw.remap),
   }
 
   validatePattern(config.out, 'out')
