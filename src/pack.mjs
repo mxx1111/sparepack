@@ -130,6 +130,17 @@ export async function buildPack(root, config) {
     })
   }
 
+  // Remap paths — strip prefixes so pack paths don't mirror repo paths.
+  for (let file of files) {
+    for (let rule of config.remap ?? []) {
+      if (file.path.startsWith(rule.from)) {
+        file.path = rule.to + file.path.slice(rule.from.length);
+        break;
+      }
+    }
+  }
+
+
   // Redact first, then scan. Scanning before redaction would report findings the author
   // already handled; scanning after is the only way to know the redactions were enough.
   const findings = []

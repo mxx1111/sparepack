@@ -65,6 +65,12 @@ redact:
   - pattern: "acme-corp|ACME"
     replace: "example-org"
 
+# Remap paths — strip a prefix so pack paths do not mirror repo paths.
+# Use when packing from a monorepo root, e.g. "packages/api/src/" -> "src/"
+# remap:
+#   - from: packages/api/src/
+#     to: src/
+
 # Extra scan rules, on top of the built-in credential and PII patterns.
 # scanRules:
 #   - id: internal-service
