@@ -8,6 +8,7 @@ import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { dirname, join, normalize, relative, resolve } from 'node:path'
 
 import { ConfigError, expand } from './config.mjs'
+import { assertInsideRoot } from './config.mjs'
 import { generateFixture } from './fixtures.mjs'
 import { stripFile, UnsupportedLanguageError } from './interfaces.mjs'
 import { countBySeverity, hasBlockingFindings, scanText, SEVERITY_ORDER } from './scan.mjs'
@@ -17,51 +18,64 @@ export const STRIPPED = 'stripped'
 export const FIXTURE = 'fixture'
 
 /**
- * Remap file destination paths by stripping the configured prefix.
+ * Remap file destination paths using ordered {from, to} mappings.
+ * First match wins. Validates traversal on both configured values and results.
+ * Reports collisions with both source paths.
  */
-function applyStripPrefix(files, prefix) {
-  if (!prefix) return files
+function applyRemap(files, remapRules, root) {
+  if (!remapRules || remapRules.length === 0) return files
 
-  // Normalize prefix to forward slashes without leading/trailing slashes for uniform matching
-  const cleanPrefix = prefix.replace(/^[\\/]+|[\\/]+$/g, '')
-  if (!cleanPrefix) return files
-
-  let matchedAny = false
   const destMap = new Map()
+  let matchedAny = false
 
   for (const file of files) {
     const origPath = file.path
     const normalized = origPath.replace(/\\/g, '/')
-    let destPath = origPath
+    let destPath = null
 
-    if (normalized === cleanPrefix || normalized.startsWith(cleanPrefix + '/')) {
-      matchedAny = true
-      destPath = normalized === cleanPrefix ? '' : normalized.slice(cleanPrefix.length + 1)
+    for (const rule of remapRules) {
+      const cleanFrom = rule.from.replace(/^[\\/]+|[\\/]+$/g, '')
+      if (!cleanFrom) continue
+
+      if (normalized === cleanFrom || normalized.startsWith(cleanFrom + '/')) {
+        matchedAny = true
+        const remainder = normalized === cleanFrom ? '' : normalized.slice(cleanFrom.length + 1)
+        const cleanTo = rule.to.replace(/^[\\/]+|[\\/]+$/g, '')
+        destPath = cleanTo ? (remainder ? `${cleanTo}/${remainder}` : cleanTo) : remainder
+        break // first match wins
+      }
+    }
+
+    if (destPath !== null) {
       if (destPath === '') {
         throw new ConfigError(
-          `stripping prefix "${prefix}" from "${origPath}" produces an empty destination path`,
+          `remapping "${origPath}" produces an empty destination path`,
         )
       }
+      // Traversal check on result
       if (destPath.startsWith('/') || destPath.split('/').includes('..')) {
         throw new ConfigError(
-          `stripping prefix "${prefix}" from "${origPath}" produces an invalid path "${destPath}" escaping pack root`,
+          `remapping "${origPath}" produces invalid path "${destPath}" escaping pack root`,
         )
       }
+      // Verify result stays inside root
+      assertInsideRoot(root, destPath, `remap result for "${origPath}"`)
     }
 
-    if (destMap.has(destPath)) {
+    const finalPath = destPath !== null ? destPath : origPath
+    if (destMap.has(finalPath)) {
       const prior = destMap.get(destPath)
       throw new ConfigError(
-        `destination path collision after stripPrefix: "${prior}" and "${origPath}" both map to "${destPath}"`,
+        `destination path collision after stripPrefix: "${prior}" and "${origPath}" both map to "${finalPath}"`,
       )
     }
-    destMap.set(destPath, origPath)
-    file.path = destPath
+    destMap.set(finalPath, origPath)
+    file.path = finalPath
   }
 
   if (!matchedAny) {
     throw new ConfigError(
-      `"stripPrefix" pattern "${prefix}" matched no files. A prefix that matches nothing is an error.`,
+      `"stripPrefix" pattern "${remapRules[0]?.from ?? 'remap'}" matched no files. A prefix that matches nothing is an error.`,
     )
   }
 
@@ -194,8 +208,8 @@ export async function buildPack(root, config) {
   }
 
   // Remap destination paths inside the pack if stripPrefix is set.
-  if (config.stripPrefix) {
-    applyStripPrefix(files, config.stripPrefix)
+  if (config.remap && config.remap.length > 0) {
+    applyRemap(files, config.remap, root)
   }
 
   const { active, suppressed } = partitionFindings(findings, config.allowFindings)
