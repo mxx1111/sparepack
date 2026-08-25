@@ -14,7 +14,7 @@ import { compileCustomRule } from './scan.mjs'
 export const CONFIG_NAMES = ['sparepack.yaml', 'sparepack.yml']
 
 const FILE_KEYS = ['include', 'interfaces', 'tests']
-const KNOWN_KEYS = new Set([...FILE_KEYS, 'task', 'fixtures', 'redact', 'scanRules', 'allowFindings', 'out'])
+const KNOWN_KEYS = new Set([...FILE_KEYS, 'task', 'fixtures', 'redact', 'scanRules', 'allowFindings', 'out', 'stripPrefix'])
 
 class ConfigError extends Error {}
 
@@ -90,6 +90,21 @@ function parseFixtures(raw) {
   })
 }
 
+function parseStripPrefix(raw) {
+  if (raw === undefined || raw === null) return undefined
+  if (typeof raw !== 'string' || !raw.trim()) {
+    fail('"stripPrefix" must be a non-empty string')
+  }
+  const prefix = raw.trim()
+  if (isAbsolute(prefix)) {
+    fail('"stripPrefix" must be a relative path prefix, not absolute')
+  }
+  if (prefix.split(/[\\/]/).includes('..')) {
+    fail('"stripPrefix" must not contain ".."')
+  }
+  return prefix
+}
+
 /** Parse config text. Separated from disk access so tests need no fixtures on disk. */
 export function parseConfig(text, { source = 'sparepack.yaml' } = {}) {
   let raw
@@ -120,6 +135,7 @@ export function parseConfig(text, { source = 'sparepack.yaml' } = {}) {
   const config = {
     task: raw.task.trim(),
     out: typeof raw.out === 'string' && raw.out.trim() ? raw.out.trim() : 'sparepack-out',
+    stripPrefix: parseStripPrefix(raw.stripPrefix),
     include: asArray(raw.include, 'include').map((p) => validatePattern(p, 'include')),
     interfaces: asArray(raw.interfaces, 'interfaces').map((p) => validatePattern(p, 'interfaces')),
     tests: asArray(raw.tests, 'tests').map((p) => validatePattern(p, 'tests')),

@@ -101,7 +101,13 @@ fixtures:                      # real structure, synthetic values
 redact:                        # names the scanner cannot know about
   - pattern: "acme-corp|ACME"
     replace: "example-org"
+
+stripPrefix: packages/api/     # strip this from every path inside the pack
 ```
+
+**Destination path remapping (`stripPrefix`).** Packing from a monorepo root otherwise gives
+you `packages/api/src/...` inside the pack. Setting `stripPrefix` strips that leading directory
+prefix from destination paths inside the pack so the receiver gets clean paths like `src/...`.
 
 **Fixture generators.** `shape[:n]` reads the real JSON and rebuilds it with the same keys and
 nesting but fake values, capping arrays at `n` elements. `rows:n` keeps a delimited file's
@@ -158,10 +164,6 @@ README and a manifest — it does not write a `package.json`, a tsconfig, or a t
 config, so a worker who clones the pack cannot run the tests until someone adds one. In
 practice you write a few lines of `package.json` by hand after packing. Worth knowing before
 you promise someone a pack they can `npm test` straight away.
-
-The paths in a pack mirror the paths in your repo, with no way to remap them. Run `sparepack`
-from the directory you want to be the pack's root — packing from a monorepo root gives you
-`packages/api/src/...` inside the pack, which is usually not what you want.
 
 The scanner is lexical. It finds patterns, not meaning. A business rule written in prose in a
 comment, a customer name that looks like an ordinary word, an internal codename you forgot to

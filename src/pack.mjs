@@ -5,9 +5,9 @@
 // author rejected still exists in a directory they might later publish by accident.
 
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, join, normalize, relative, resolve } from 'node:path'
 
-import { expand } from './config.mjs'
+import { ConfigError, expand } from './config.mjs'
 import { generateFixture } from './fixtures.mjs'
 import { stripFile, UnsupportedLanguageError } from './interfaces.mjs'
 import { countBySeverity, hasBlockingFindings, scanText, SEVERITY_ORDER } from './scan.mjs'
@@ -15,6 +15,58 @@ import { countBySeverity, hasBlockingFindings, scanText, SEVERITY_ORDER } from '
 export const VERBATIM = 'verbatim'
 export const STRIPPED = 'stripped'
 export const FIXTURE = 'fixture'
+
+/**
+ * Remap file destination paths by stripping the configured prefix.
+ */
+function applyStripPrefix(files, prefix) {
+  if (!prefix) return files
+
+  // Normalize prefix to forward slashes without leading/trailing slashes for uniform matching
+  const cleanPrefix = prefix.replace(/^[\\/]+|[\\/]+$/g, '')
+  if (!cleanPrefix) return files
+
+  let matchedAny = false
+  const destMap = new Map()
+
+  for (const file of files) {
+    const origPath = file.path
+    const normalized = origPath.replace(/\\/g, '/')
+    let destPath = origPath
+
+    if (normalized === cleanPrefix || normalized.startsWith(cleanPrefix + '/')) {
+      matchedAny = true
+      destPath = normalized === cleanPrefix ? '' : normalized.slice(cleanPrefix.length + 1)
+      if (destPath === '') {
+        throw new ConfigError(
+          `stripping prefix "${prefix}" from "${origPath}" produces an empty destination path`,
+        )
+      }
+      if (destPath.startsWith('/') || destPath.split('/').includes('..')) {
+        throw new ConfigError(
+          `stripping prefix "${prefix}" from "${origPath}" produces an invalid path "${destPath}" escaping pack root`,
+        )
+      }
+    }
+
+    if (destMap.has(destPath)) {
+      const prior = destMap.get(destPath)
+      throw new ConfigError(
+        `destination path collision after stripPrefix: "${prior}" and "${origPath}" both map to "${destPath}"`,
+      )
+    }
+    destMap.set(destPath, origPath)
+    file.path = destPath
+  }
+
+  if (!matchedAny) {
+    throw new ConfigError(
+      `"stripPrefix" pattern "${prefix}" matched no files. A prefix that matches nothing is an error.`,
+    )
+  }
+
+  return files
+}
 
 /** Apply the author's redact rules, reporting which ones actually fired. */
 export function applyRedactions(text, rules) {
@@ -139,6 +191,11 @@ export async function buildPack(root, config) {
     file.redactions = applied
     file.bytes = Buffer.byteLength(text)
     findings.push(...scanText(text, { path: file.path, customRules: config.scanRules }))
+  }
+
+  // Remap destination paths inside the pack if stripPrefix is set.
+  if (config.stripPrefix) {
+    applyStripPrefix(files, config.stripPrefix)
   }
 
   const { active, suppressed } = partitionFindings(findings, config.allowFindings)
