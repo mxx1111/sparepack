@@ -14,7 +14,7 @@ import { compileCustomRule } from './scan.mjs'
 export const CONFIG_NAMES = ['sparepack.yaml', 'sparepack.yml']
 
 const FILE_KEYS = ['include', 'interfaces', 'tests']
-const KNOWN_KEYS = new Set([...FILE_KEYS, 'task', 'fixtures', 'redact', 'scanRules', 'allowFindings', 'out', 'stripPrefix'])
+const KNOWN_KEYS = new Set([...FILE_KEYS, 'task', 'fixtures', 'redact', 'scanRules', 'allowFindings', 'out', 'stripPrefix', 'remap'])
 
 class ConfigError extends Error {}
 
@@ -90,6 +90,29 @@ function parseFixtures(raw) {
   })
 }
 
+function parseRemap(raw) {
+  if (raw === undefined || raw === null) return undefined
+  if (!Array.isArray(raw)) fail('"remap" must be a list of {from, to} mappings')
+  if (raw.length === 0) fail('"remap" must contain at least one mapping')
+  return raw.map((entry, i) => {
+    if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
+      fail(`remap[${i}] must be an object with "from" and "to" string keys`)
+    }
+    if (typeof entry.from !== 'string' || !entry.from.trim()) {
+      fail(`remap[${i}].from must be a non-empty string`)
+    }
+    if (typeof entry.to !== 'string') {
+      fail(`remap[${i}].to must be a string (may be empty for root)`)
+    }
+    const from = entry.from.trim()
+    const to = entry.to
+    if (isAbsolute(from)) fail(`remap[${i}].from must be relative, not absolute`)
+    if (from.split(/[\\/]/).includes('..')) fail(`remap[${i}].from must not contain ".."`)
+    if (to.split('/').includes('..')) fail(`remap[${i}].to must not contain ".."`)
+    return { from, to }
+  })
+}
+
 function parseStripPrefix(raw) {
   if (raw === undefined || raw === null) return undefined
   if (typeof raw !== 'string' || !raw.trim()) {
@@ -136,6 +159,7 @@ export function parseConfig(text, { source = 'sparepack.yaml' } = {}) {
     task: raw.task.trim(),
     out: typeof raw.out === 'string' && raw.out.trim() ? raw.out.trim() : 'sparepack-out',
     stripPrefix: parseStripPrefix(raw.stripPrefix),
+    remap: parseRemap(raw.remap),
     include: asArray(raw.include, 'include').map((p) => validatePattern(p, 'include')),
     interfaces: asArray(raw.interfaces, 'interfaces').map((p) => validatePattern(p, 'interfaces')),
     tests: asArray(raw.tests, 'tests').map((p) => validatePattern(p, 'tests')),
@@ -146,9 +170,17 @@ export function parseConfig(text, { source = 'sparepack.yaml' } = {}) {
       if (typeof entry !== 'string' || !entry.includes(':')) {
         fail(`allowFindings[${i}] must look like "rule-id:path" or "rule-id:path:line"`)
       }
+
+
       return entry
     }),
   }
+
+  if (config.stripPrefix && config.remap) {
+    fail('"stripPrefix" and "remap" are mutually exclusive — use "remap" for generalized prefix stripping')
+  }
+
+
 
   validatePattern(config.out, 'out')
 

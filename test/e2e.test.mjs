@@ -438,3 +438,140 @@ out: pack
   assert.match(result.stderr, /foo\.ts/)
   assert.match(result.stderr, /src\/billing\/foo\.ts/)
 })
+
+
+test('remap generalizes stripPrefix with from/to mappings', async (t) => {
+  const root = await makeRepo()
+  t.after(() => rm(root, { recursive: true, force: true }))
+
+  // Create an extra file under tests/ so we can remap two distinct prefixes
+  await mkdir(join(root, 'tests', 'shared'), { recursive: true })
+  await writeFile(join(root, 'tests', 'shared', 'helpers.spec.ts'), 'import { charge } from "../../src/billing/gateway"\ntest("helper", () => {})\n')
+
+  const config = `task: "Generalize prefix stripping via remap"
+remap:
+  - from: src/billing
+    to: billing
+  - from: tests/shared
+    to: lib
+include:
+  - src/billing/types.ts
+interfaces:
+  - src/billing/gateway.ts
+tests:
+  - tests/billing/*.spec.ts
+  - tests/shared/helpers.spec.ts
+fixtures:
+  data/customers.json: shape:2
+out: pack
+`
+  await writeFile(join(root, 'sparepack.yaml'), config)
+
+  const packed = await cli(root, ['pack', '--yes', '--no-color'])
+  assert.equal(packed.code, 0, `pack failed:\n${packed.stdout}\n${packed.stderr}`)
+
+  const { dir, files } = await readPack(root)
+
+  // Verify remapped paths
+  assert.ok(files['billing/types.ts'], 'src/billing/types.ts should remap to billing/types.ts')
+  assert.ok(files['lib/helpers.spec.ts'], 'tests/shared/helpers.spec.ts should remap to lib/helpers.spec.ts')
+  assert.ok(files['billing/gateway.ts'], 'src/billing/gateway.ts should remap to billing/gateway.ts')
+  assert.ok(files['tests/billing/charge.spec.ts'], 'non-matching paths remain untouched')
+  assert.ok(files['data/customers.json'])
+
+  // Verify MANIFEST.json matches remapped paths
+  const manifest = JSON.parse(await readFile(join(root, 'pack', 'MANIFEST.json'), 'utf8'))
+  const manifestPaths = manifest.files.map((f) => f.path)
+  assert.ok(manifestPaths.includes('billing/types.ts'))
+  assert.ok(manifestPaths.includes('lib/helpers.spec.ts'))
+  assert.ok(manifestPaths.includes('billing/gateway.ts'))
+
+  // Verify pack verify works on remapped pack
+  const verified = await cli(root, ['verify', dir])
+  assert.equal(verified.code, 0, `verify failed:\n${verified.stdout}\n${verified.stderr}`)
+  assert.match(verified.stdout, /No problems found/)
+})
+
+test('remap and stripPrefix are mutually exclusive', async (t) => {
+  const root = await makeRepo()
+  t.after(() => rm(root, { recursive: true, force: true }))
+
+  const config = `task: "x"
+stripPrefix: src/billing
+remap:
+  - from: src/billing
+    to: billing
+include:
+  - src/billing/types.ts
+out: pack
+`
+  await writeFile(join(root, 'sparepack.yaml'), config)
+
+  const result = await cli(root, ['pack', '--yes'])
+  assert.notEqual(result.code, 0, 'should fail when both stripPrefix and remap are set')
+  assert.match(result.stderr, /mutually exclusive/)
+})
+
+test('remap that matches no files is an error', async (t) => {
+  const root = await makeRepo()
+  t.after(() => rm(root, { recursive: true, force: true }))
+
+  const config = `task: "x"
+remap:
+  - from: non_existent
+    to: dest
+include:
+  - src/billing/types.ts
+out: pack
+`
+  await writeFile(join(root, 'sparepack.yaml'), config)
+
+  const result = await cli(root, ['pack', '--yes'])
+  assert.equal(result.code, 2)
+  assert.match(result.stderr, /"remap" rules matched no files/)
+})
+
+test('remap collision is an error naming both paths', async (t) => {
+  const root = await makeRepo()
+  t.after(() => rm(root, { recursive: true, force: true }))
+
+  await writeFile(join(root, 'foo.ts'), 'export const a = 1\n')
+  await writeFile(join(root, 'src', 'billing', 'foo.ts'), 'export const b = 2\n')
+
+  const config = `task: "x"
+remap:
+  - from: src/billing
+    to: ""
+include:
+  - foo.ts
+  - src/billing/foo.ts
+out: pack
+`
+  await writeFile(join(root, 'sparepack.yaml'), config)
+
+  const result = await cli(root, ['pack', '--yes'])
+  assert.equal(result.code, 2)
+  assert.match(result.stderr, /destination path collision after remap/)
+})
+
+test('remap backward compat: stripPrefix still works unchanged', async (t) => {
+  const root = await makeRepo()
+  t.after(() => rm(root, { recursive: true, force: true }))
+
+  const config = `task: "Verify stripPrefix backward compatibility"
+stripPrefix: src/billing/
+include:
+  - src/billing/types.ts
+interfaces:
+  - src/billing/gateway.ts
+out: pack
+`
+  await writeFile(join(root, 'sparepack.yaml'), config)
+
+  const packed = await cli(root, ['pack', '--yes', '--no-color'])
+  assert.equal(packed.code, 0, `pack failed:\n${packed.stdout}\n${packed.stderr}`)
+
+  const { files } = await readPack(root)
+  assert.ok(files['types.ts'], 'stripPrefix should still remap to root')
+  assert.ok(files['gateway.ts'], 'stripPrefix should still remap interfaces to root')
+})

@@ -68,6 +68,66 @@ function applyStripPrefix(files, prefix) {
   return files
 }
 
+
+/**
+ * Remap file destination paths using generalized from->to mappings.
+ * Generalizes stripPrefix: each rule maps a source prefix to an arbitrary dest prefix.
+ */
+function applyRemap(files, rules) {
+  if (!rules || rules.length === 0) return files
+
+  const destMap = new Map()
+  let matchedAny = false
+
+  for (const file of files) {
+    const origPath = file.path
+    const normalized = origPath.replace(/\\/g, '/')
+    let destPath = origPath
+    let matched = false
+
+    for (const rule of rules) {
+      const cleanFrom = rule.from.replace(/^[\\/]+|[\\/]+$/g, '')
+      const cleanTo = rule.to.replace(/^[\\/]+|[\\/]+$/g, '')
+
+      if (normalized === cleanFrom || normalized.startsWith(cleanFrom + '/')) {
+        matched = true
+        matchedAny = true
+        const remainder = normalized === cleanFrom ? '' : normalized.slice(cleanFrom.length + 1)
+        destPath = cleanTo ? (remainder ? cleanTo + '/' + remainder : cleanTo) : remainder
+        break
+      }
+    }
+
+    if (destPath === '') {
+      throw new ConfigError(
+        `remap rule produced an empty destination path for "${origPath}"`,
+      )
+    }
+    if (destPath.startsWith('/') || destPath.split('/').includes('..')) {
+      throw new ConfigError(
+        `remap rule produced an invalid path "${destPath}" from "${origPath}" escaping pack root`,
+      )
+    }
+
+    if (destMap.has(destPath)) {
+      const prior = destMap.get(destPath)
+      throw new ConfigError(
+        `destination path collision after remap: "${prior}" and "${origPath}" both map to "${destPath}"`,
+      )
+    }
+    destMap.set(destPath, origPath)
+    file.path = destPath
+  }
+
+  if (!matchedAny) {
+    throw new ConfigError(
+      `"remap" rules matched no files. At least one rule must match.`,
+    )
+  }
+
+  return files
+}
+
 /** Apply the author's redact rules, reporting which ones actually fired. */
 export function applyRedactions(text, rules) {
   let out = text
@@ -193,9 +253,11 @@ export async function buildPack(root, config) {
     findings.push(...scanText(text, { path: file.path, customRules: config.scanRules }))
   }
 
-  // Remap destination paths inside the pack if stripPrefix is set.
+  // Remap destination paths inside the pack if stripPrefix or remap is set.
   if (config.stripPrefix) {
     applyStripPrefix(files, config.stripPrefix)
+  } else if (config.remap) {
+    applyRemap(files, config.remap)
   }
 
   const { active, suppressed } = partitionFindings(findings, config.allowFindings)
