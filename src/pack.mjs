@@ -66,7 +66,7 @@ function applyRemap(files, remapRules, root) {
     if (destMap.has(finalPath)) {
       const prior = destMap.get(destPath)
       throw new ConfigError(
-        `destination path collision after stripPrefix: "${prior}" and "${origPath}" both map to "${finalPath}"`,
+        `destination path collision after remap: "${prior}" and "${origPath}" both map to "${finalPath}"`,
       )
     }
     destMap.set(finalPath, origPath)
@@ -75,7 +75,7 @@ function applyRemap(files, remapRules, root) {
 
   if (!matchedAny) {
     throw new ConfigError(
-      `"stripPrefix" pattern "${remapRules[0]?.from ?? 'remap'}" matched no files. A prefix that matches nothing is an error.`,
+      `"remap" pattern "${remapRules[0]?.from ?? 'remap'}" matched no files. A remap rule that matches nothing is an error.`,
     )
   }
 
@@ -410,3 +410,4 @@ export async function writePack(outDir, manifest, files) {
 }
 
 export { hasBlockingFindings }
+export { applyRemap }

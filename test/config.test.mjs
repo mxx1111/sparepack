@@ -136,3 +136,67 @@ test('out defaults to sparepack-out and must stay inside the repo', () => {
   assert.equal(parseConfig(`${base}out: dist/pack\n`).out, 'dist/pack')
   bad(`${base}out: /tmp/anywhere\n`, /must be relative/)
 })
+
+// --- remap ----------------------------------------------------------------
+
+test('remap: multiple mappings with first-match-wins and second rule hit', () => {
+  const config = parseConfig(`${base}remap:\n  - from: src/a\n    to: lib/x\n  - from: src/b\n    to: lib/y\n`)
+  assert.equal(config.remap.length, 2)
+  assert.equal(config.remap[0].from, 'src/a')
+  assert.equal(config.remap[1].from, 'src/b')
+})
+
+test('remap: collision error includes both source paths', async (t) => {
+  const pack = await import('../src/pack.mjs')
+  const { applyRemap } = pack
+  const files = [
+    { path: 'src/a/file.ts' },
+    { path: 'src/b/file.ts' },
+  ]
+  const rules = [
+    { from: 'src/a', to: 'out' },
+    { from: 'src/b', to: 'out' },
+  ]
+  assert.throws(
+    () => applyRemap(files, rules, '/tmp'),
+    (err) => {
+      assert.ok(err instanceof Error, `expected Error, got ${err.constructor.name}`)
+      assert.match(err.message, /after remap/)
+      assert.match(err.message, /src\/a\/file\.ts/)
+      assert.match(err.message, /src\/b\/file\.ts/)
+      return true
+    },
+  )
+})
+
+test('remap: traversal in from is rejected at parse time', () => {
+  bad(`${base}remap:\n  - from: ../escape\n    to: safe\n`, /must not contain "\.\."/)
+})
+
+test('remap: traversal in to is rejected at parse time', () => {
+  bad(`${base}remap:\n  - from: src\n    to: ../escape\n`, /must not contain "\.\."/)
+})
+
+test('remap: absolute path in from is rejected', () => {
+  bad(`${base}remap:\n  - from: /absolute/path\n    to: out\n`, /must be relative/)
+})
+
+test('remap: no-match error references remap not stripPrefix', async (t) => {
+  const pack = await import('../src/pack.mjs')
+  const { applyRemap } = pack
+  const files = [{ path: 'unrelated/file.ts' }]
+  const rules = [{ from: 'src/nope', to: 'out' }]
+  assert.throws(
+    () => applyRemap(files, rules, '/tmp'),
+    (err) => {
+      assert.ok(err instanceof Error, `expected Error, got ${err.constructor.name}`)
+      assert.match(err.message, /"remap" pattern/)
+      assert.doesNotMatch(err.message, /"stripPrefix" pattern/)
+      return true
+    },
+  )
+})
+
+test('stripPrefix and remap mutual exclusion', () => {
+  bad(`${base}stripPrefix: packages/api/\nremap:\n  - from: src\n    to: lib\n`, /cannot both be set/)
+})

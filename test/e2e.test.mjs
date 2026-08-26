@@ -405,7 +405,7 @@ out: pack
 
   const result = await cli(root, ['pack', '--yes'])
   assert.equal(result.code, 2)
-  assert.match(result.stderr, /"stripPrefix" pattern ".*" matched no files/)
+  assert.match(result.stderr, /"remap" pattern ".*" matched no files/)
 })
 
 test('stripPrefix collision is an error naming both paths', async (t) => {
@@ -434,7 +434,7 @@ out: pack
 
   const result = await cli(root, ['pack', '--yes'])
   assert.equal(result.code, 2)
-  assert.match(result.stderr, /destination path collision after stripPrefix/)
+  assert.match(result.stderr, /destination path collision after remap/)
   assert.match(result.stderr, /foo\.ts/)
   assert.match(result.stderr, /src\/billing\/foo\.ts/)
 })
