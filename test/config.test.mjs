@@ -2,6 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
 import { assertInsideRoot, ConfigError, parseConfig } from '../src/config.mjs'
+import { applyRemap } from '../src/pack.mjs'
 
 const base = 'task: "do a thing"\ninclude:\n  - src/a.ts\n'
 
@@ -139,29 +140,78 @@ test('out defaults to sparepack-out and must stay inside the repo', () => {
 
 // --- remap ----------------------------------------------------------------
 
-test('remap: multiple mappings with first-match-wins and second rule hit', () => {
-  const config = parseConfig(`${base}remap:\n  - from: src/a\n    to: lib/x\n  - from: src/b\n    to: lib/y\n`)
-  assert.equal(config.remap.length, 2)
-  assert.equal(config.remap[0].from, 'src/a')
-  assert.equal(config.remap[1].from, 'src/b')
+test('remap: overlapping mappings use the first match and later rules can still match', () => {
+  const files = [
+    { path: 'src/special/file.ts' },
+    { path: 'src/other.ts' },
+  ]
+  const rules = [
+    { from: 'src/special', to: 'special' },
+    { from: 'src', to: 'lib' },
+  ]
+
+  applyRemap(files, rules, '/tmp')
+
+  assert.deepEqual(files.map((file) => file.path), ['special/file.ts', 'lib/other.ts'])
 })
 
-test('remap: collision error includes both source paths', async (t) => {
-  const pack = await import('../src/pack.mjs')
-  const { applyRemap } = pack
-  const files = [
-    { path: 'src/a/file.ts' },
-    { path: 'src/b/file.ts' },
+test('remap: collision error includes mapped and untouched source paths in either order', () => {
+  const rules = [{ from: 'src/a', to: 'out' }]
+  const sourceOrders = [
+    ['src/a/file.ts', 'out/file.ts'],
+    ['out/file.ts', 'src/a/file.ts'],
   ]
+
+  for (const sourcePaths of sourceOrders) {
+    const files = sourcePaths.map((path) => ({ path }))
+    assert.throws(
+      () => applyRemap(files, rules, '/tmp'),
+      (err) => {
+        assert.ok(err instanceof Error, `expected Error, got ${err.constructor.name}`)
+        assert.match(err.message, /after remap/)
+        assert.match(err.message, /src\/a\/file\.ts/)
+        assert.match(err.message, /out\/file\.ts/)
+        return true
+      },
+    )
+  }
+})
+
+test('remap: canonical path aliases cannot bypass collision detection', () => {
+  const aliases = [
+    { source: 'src/file.ts', to: '.', untouched: 'file.ts' },
+    { source: 'src/file.ts', to: 'out//nested', untouched: 'out/nested/file.ts' },
+    { source: 'src/file.ts', to: 'out/.', untouched: 'out/file.ts' },
+    { source: 'src/file.ts', to: 'out\\\\nested', untouched: 'out/nested/file.ts' },
+    { source: 'src\\\\file.ts', to: 'out', untouched: 'out/file.ts' },
+  ]
+
+  for (const { source, to, untouched } of aliases) {
+    const files = [{ path: source }, { path: untouched }]
+    assert.throws(
+      () => applyRemap(files, [{ from: 'src', to }], '/tmp'),
+      (err) => {
+        assert.ok(err instanceof Error, `expected Error, got ${err.constructor.name}`)
+        assert.match(err.message, /destination path collision after remap/)
+        assert.ok(err.message.includes(source), `missing source path in: ${err.message}`)
+        assert.ok(err.message.includes(untouched), `missing destination peer in: ${err.message}`)
+        return true
+      },
+    )
+  }
+})
+
+test('remap: two mapped sources colliding name both sources', () => {
+  const files = [{ path: 'src/a/file.ts' }, { path: 'src/b/file.ts' }]
   const rules = [
     { from: 'src/a', to: 'out' },
     { from: 'src/b', to: 'out' },
   ]
+
   assert.throws(
     () => applyRemap(files, rules, '/tmp'),
     (err) => {
       assert.ok(err instanceof Error, `expected Error, got ${err.constructor.name}`)
-      assert.match(err.message, /after remap/)
       assert.match(err.message, /src\/a\/file\.ts/)
       assert.match(err.message, /src\/b\/file\.ts/)
       return true
@@ -181,19 +231,46 @@ test('remap: absolute path in from is rejected', () => {
   bad(`${base}remap:\n  - from: /absolute/path\n    to: out\n`, /must be relative/)
 })
 
-test('remap: no-match error references remap not stripPrefix', async (t) => {
-  const pack = await import('../src/pack.mjs')
-  const { applyRemap } = pack
-  const files = [{ path: 'unrelated/file.ts' }]
-  const rules = [{ from: 'src/nope', to: 'out' }]
+test('remap: traversal introduced in the result is rejected', () => {
+  const files = [{ path: 'src/../escape.ts' }]
+  const rules = [{ from: 'src', to: 'safe' }]
   assert.throws(
     () => applyRemap(files, rules, '/tmp'),
     (err) => {
       assert.ok(err instanceof Error, `expected Error, got ${err.constructor.name}`)
-      assert.match(err.message, /"remap" pattern/)
+      assert.match(err.message, /invalid path "safe\/\.\.\/escape\.ts" escaping pack root/)
+      return true
+    },
+  )
+})
+
+test('remap: every individual rule must match a file', () => {
+  const files = [{ path: 'src/file.ts' }]
+  const rules = [
+    { from: 'src', to: 'lib' },
+    { from: 'tests', to: 'spec' },
+  ]
+  assert.throws(
+    () => applyRemap(files, rules, '/tmp'),
+    (err) => {
+      assert.ok(err instanceof Error, `expected Error, got ${err.constructor.name}`)
+      assert.match(err.message, /"remap" pattern "tests" matched no files/)
       assert.doesNotMatch(err.message, /"stripPrefix" pattern/)
       return true
     },
+  )
+})
+
+test('remap: a fully shadowed rule is treated as unused', () => {
+  const files = [{ path: 'src/special/file.ts' }]
+  const rules = [
+    { from: 'src', to: 'lib' },
+    { from: 'src/special', to: 'special' },
+  ]
+
+  assert.throws(
+    () => applyRemap(files, rules, '/tmp'),
+    /"remap" pattern "src\/special" matched no files/,
   )
 })
 

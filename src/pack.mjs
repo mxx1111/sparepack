@@ -5,7 +5,7 @@
 // author rejected still exists in a directory they might later publish by accident.
 
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
-import { dirname, join, normalize, relative, resolve } from 'node:path'
+import { dirname, join, posix, resolve } from 'node:path'
 
 import { ConfigError, expand } from './config.mjs'
 import { assertInsideRoot } from './config.mjs'
@@ -26,45 +26,52 @@ function applyRemap(files, remapRules, root) {
   if (!remapRules || remapRules.length === 0) return files
 
   const destMap = new Map()
-  let matchedAny = false
+  const matchedRules = new Set()
 
   for (const file of files) {
     const origPath = file.path
     const normalized = origPath.replace(/\\/g, '/')
     let destPath = null
 
-    for (const rule of remapRules) {
-      const cleanFrom = rule.from.replace(/^[\\/]+|[\\/]+$/g, '')
+    for (const [ruleIndex, rule] of remapRules.entries()) {
+      const cleanFrom = posix.normalize(
+        rule.from.replace(/\\/g, '/').replace(/^\/+|\/+$/g, ''),
+      )
       if (!cleanFrom) continue
 
       if (normalized === cleanFrom || normalized.startsWith(cleanFrom + '/')) {
-        matchedAny = true
+        matchedRules.add(ruleIndex)
         const remainder = normalized === cleanFrom ? '' : normalized.slice(cleanFrom.length + 1)
-        const cleanTo = rule.to.replace(/^[\\/]+|[\\/]+$/g, '')
+        const cleanTo = rule.to.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
         destPath = cleanTo ? (remainder ? `${cleanTo}/${remainder}` : cleanTo) : remainder
         break // first match wins
       }
     }
 
-    if (destPath !== null) {
-      if (destPath === '') {
-        throw new ConfigError(
-          `remapping "${origPath}" produces an empty destination path`,
-        )
-      }
-      // Traversal check on result
-      if (destPath.startsWith('/') || destPath.split('/').includes('..')) {
-        throw new ConfigError(
-          `remapping "${origPath}" produces invalid path "${destPath}" escaping pack root`,
-        )
-      }
-      // Verify result stays inside root
-      assertInsideRoot(root, destPath, `remap result for "${origPath}"`)
+    const rawFinalPath = destPath !== null ? destPath : normalized
+    if (rawFinalPath === '') {
+      throw new ConfigError(
+        `remapping "${origPath}" produces an empty destination path`,
+      )
     }
+    // Reject traversal before normalizing: collapsing an attempted escape would
+    // hide the evidence. Then canonicalize aliases before collision detection
+    // and writing so ./a.ts, a//b.ts, and a/./b.ts cannot name the same file.
+    if (rawFinalPath.startsWith('/') || rawFinalPath.split('/').includes('..')) {
+      throw new ConfigError(
+        `remapping "${origPath}" produces invalid path "${rawFinalPath}" escaping pack root`,
+      )
+    }
+    const finalPath = posix.normalize(rawFinalPath)
+    if (finalPath === '.' || posix.isAbsolute(finalPath)) {
+      throw new ConfigError(
+        `remapping "${origPath}" produces invalid path "${rawFinalPath}" escaping pack root`,
+      )
+    }
+    assertInsideRoot(root, finalPath, `remap result for "${origPath}"`)
 
-    const finalPath = destPath !== null ? destPath : origPath
     if (destMap.has(finalPath)) {
-      const prior = destMap.get(destPath)
+      const prior = destMap.get(finalPath)
       throw new ConfigError(
         `destination path collision after remap: "${prior}" and "${origPath}" both map to "${finalPath}"`,
       )
@@ -73,10 +80,12 @@ function applyRemap(files, remapRules, root) {
     file.path = finalPath
   }
 
-  if (!matchedAny) {
-    throw new ConfigError(
-      `"remap" pattern "${remapRules[0]?.from ?? 'remap'}" matched no files. A remap rule that matches nothing is an error.`,
-    )
+  for (const [ruleIndex, rule] of remapRules.entries()) {
+    if (!matchedRules.has(ruleIndex)) {
+      throw new ConfigError(
+        `"remap" pattern "${rule.from}" matched no files. A remap rule that matches nothing is an error.`,
+      )
+    }
   }
 
   return files
@@ -207,7 +216,7 @@ export async function buildPack(root, config) {
     findings.push(...scanText(text, { path: file.path, customRules: config.scanRules }))
   }
 
-  // Remap destination paths inside the pack if stripPrefix is set.
+  // Remap destination paths inside the pack after content processing.
   if (config.remap && config.remap.length > 0) {
     applyRemap(files, config.remap, root)
   }

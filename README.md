@@ -102,12 +102,21 @@ redact:                        # names the scanner cannot know about
   - pattern: "acme-corp|ACME"
     replace: "example-org"
 
-stripPrefix: packages/api/     # strip this from every path inside the pack
+remap:                         # rewrite destination paths inside the pack
+  - from: src/importer/
+    to: src/
+  - from: tests/importer/
+    to: tests/
 ```
 
-**Destination path remapping (`stripPrefix`).** Packing from a monorepo root otherwise gives
-you `packages/api/src/...` inside the pack. Setting `stripPrefix` strips that leading directory
-prefix from destination paths inside the pack so the receiver gets clean paths like `src/...`.
+**Destination path remapping (`remap`).** Mappings are evaluated in order and the first match
+wins for each selected file. Every configured `from` must match at least one file; a stale or
+shadowed rule is a hard error. Results must remain relative to the pack root, and two source
+paths may not collide after remapping. `MANIFEST.json` records the post-remap paths.
+
+For the common single-prefix case, `stripPrefix: packages/api/` remains backward-compatible
+sugar for `remap: [{ from: packages/api/, to: "" }]`. Do not set `stripPrefix` and `remap`
+together.
 
 **Fixture generators.** `shape[:n]` reads the real JSON and rebuilds it with the same keys and
 nesting but fake values, capping arrays at `n` elements. `rows:n` keeps a delimited file's

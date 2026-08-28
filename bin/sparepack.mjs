@@ -71,8 +71,16 @@ redact:
 #     pattern: "\\\\b(billing|ledger)-internal\\\\b"
 #     severity: high
 
-# Strip a leading path prefix from destination paths inside the pack.
-# Useful when running from a monorepo root to avoid paths like "packages/api/src/...".
+# Remap destination paths with ordered mappings. The first matching rule wins, and every
+# "from" must match at least one file. Remapped paths are also written to MANIFEST.json.
+# remap:
+#   - from: packages/api/
+#     to: ""
+#   - from: packages/web/
+#     to: apps/web/
+#
+# For one prefix, stripPrefix is backward-compatible sugar for one {from, to: ""} rule.
+# Do not set stripPrefix and remap together.
 # stripPrefix: packages/api/
 
 # Findings you have looked at and decided are fine. Format: rule-id:path[:line]
