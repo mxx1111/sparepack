@@ -5,9 +5,10 @@
 // author rejected still exists in a directory they might later publish by accident.
 
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
-import { dirname, join, normalize, relative, resolve } from 'node:path'
+import { dirname, join, posix, resolve } from 'node:path'
 
 import { ConfigError, expand } from './config.mjs'
+import { assertInsideRoot } from './config.mjs'
 import { generateFixture } from './fixtures.mjs'
 import { stripFile, UnsupportedLanguageError } from './interfaces.mjs'
 import { countBySeverity, hasBlockingFindings, scanText, SEVERITY_ORDER } from './scan.mjs'
@@ -17,52 +18,74 @@ export const STRIPPED = 'stripped'
 export const FIXTURE = 'fixture'
 
 /**
- * Remap file destination paths by stripping the configured prefix.
+ * Remap file destination paths using ordered {from, to} mappings.
+ * First match wins. Validates traversal on both configured values and results.
+ * Reports collisions with both source paths.
  */
-function applyStripPrefix(files, prefix) {
-  if (!prefix) return files
+function applyRemap(files, remapRules, root) {
+  if (!remapRules || remapRules.length === 0) return files
 
-  // Normalize prefix to forward slashes without leading/trailing slashes for uniform matching
-  const cleanPrefix = prefix.replace(/^[\\/]+|[\\/]+$/g, '')
-  if (!cleanPrefix) return files
-
-  let matchedAny = false
   const destMap = new Map()
+  const matchedRules = new Set()
 
   for (const file of files) {
     const origPath = file.path
     const normalized = origPath.replace(/\\/g, '/')
-    let destPath = origPath
+    let destPath = null
 
-    if (normalized === cleanPrefix || normalized.startsWith(cleanPrefix + '/')) {
-      matchedAny = true
-      destPath = normalized === cleanPrefix ? '' : normalized.slice(cleanPrefix.length + 1)
-      if (destPath === '') {
-        throw new ConfigError(
-          `stripping prefix "${prefix}" from "${origPath}" produces an empty destination path`,
-        )
-      }
-      if (destPath.startsWith('/') || destPath.split('/').includes('..')) {
-        throw new ConfigError(
-          `stripping prefix "${prefix}" from "${origPath}" produces an invalid path "${destPath}" escaping pack root`,
-        )
+    for (const [ruleIndex, rule] of remapRules.entries()) {
+      const cleanFrom = posix.normalize(
+        rule.from.replace(/\\/g, '/').replace(/^\/+|\/+$/g, ''),
+      )
+      if (!cleanFrom) continue
+
+      if (normalized === cleanFrom || normalized.startsWith(cleanFrom + '/')) {
+        matchedRules.add(ruleIndex)
+        const remainder = normalized === cleanFrom ? '' : normalized.slice(cleanFrom.length + 1)
+        const cleanTo = rule.to.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
+        destPath = cleanTo ? (remainder ? `${cleanTo}/${remainder}` : cleanTo) : remainder
+        break // first match wins
       }
     }
 
-    if (destMap.has(destPath)) {
-      const prior = destMap.get(destPath)
+    const rawFinalPath = destPath !== null ? destPath : normalized
+    if (rawFinalPath === '') {
       throw new ConfigError(
-        `destination path collision after stripPrefix: "${prior}" and "${origPath}" both map to "${destPath}"`,
+        `remapping "${origPath}" produces an empty destination path`,
       )
     }
-    destMap.set(destPath, origPath)
-    file.path = destPath
+    // Reject traversal before normalizing: collapsing an attempted escape would
+    // hide the evidence. Then canonicalize aliases before collision detection
+    // and writing so ./a.ts, a//b.ts, and a/./b.ts cannot name the same file.
+    if (rawFinalPath.startsWith('/') || rawFinalPath.split('/').includes('..')) {
+      throw new ConfigError(
+        `remapping "${origPath}" produces invalid path "${rawFinalPath}" escaping pack root`,
+      )
+    }
+    const finalPath = posix.normalize(rawFinalPath)
+    if (finalPath === '.' || posix.isAbsolute(finalPath)) {
+      throw new ConfigError(
+        `remapping "${origPath}" produces invalid path "${rawFinalPath}" escaping pack root`,
+      )
+    }
+    assertInsideRoot(root, finalPath, `remap result for "${origPath}"`)
+
+    if (destMap.has(finalPath)) {
+      const prior = destMap.get(finalPath)
+      throw new ConfigError(
+        `destination path collision after remap: "${prior}" and "${origPath}" both map to "${finalPath}"`,
+      )
+    }
+    destMap.set(finalPath, origPath)
+    file.path = finalPath
   }
 
-  if (!matchedAny) {
-    throw new ConfigError(
-      `"stripPrefix" pattern "${prefix}" matched no files. A prefix that matches nothing is an error.`,
-    )
+  for (const [ruleIndex, rule] of remapRules.entries()) {
+    if (!matchedRules.has(ruleIndex)) {
+      throw new ConfigError(
+        `"remap" pattern "${rule.from}" matched no files. A remap rule that matches nothing is an error.`,
+      )
+    }
   }
 
   return files
@@ -193,9 +216,9 @@ export async function buildPack(root, config) {
     findings.push(...scanText(text, { path: file.path, customRules: config.scanRules }))
   }
 
-  // Remap destination paths inside the pack if stripPrefix is set.
-  if (config.stripPrefix) {
-    applyStripPrefix(files, config.stripPrefix)
+  // Remap destination paths inside the pack after content processing.
+  if (config.remap && config.remap.length > 0) {
+    applyRemap(files, config.remap, root)
   }
 
   const { active, suppressed } = partitionFindings(findings, config.allowFindings)
@@ -396,3 +419,4 @@ export async function writePack(outDir, manifest, files) {
 }
 
 export { hasBlockingFindings }
+export { applyRemap }

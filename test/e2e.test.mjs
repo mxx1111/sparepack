@@ -132,18 +132,21 @@ async function cli(root, args, { input } = {}) {
   }
 }
 
-async function readPack(root) {
-  const dir = join(root, 'pack')
+async function readPack(root, out = 'pack', encoding = 'utf8') {
+  const dir = join(root, out)
   const files = {}
   const walk = async (rel) => {
     for (const entry of await readdir(join(dir, rel), { withFileTypes: true })) {
       const next = rel ? join(rel, entry.name) : entry.name
       if (entry.isDirectory()) await walk(next)
-      else files[next] = await readFile(join(dir, next), 'utf8')
+      else {
+        const key = next.replace(/\\/g, '/')
+        files[key] = encoding === null ? await readFile(join(dir, next)) : await readFile(join(dir, next), encoding)
+      }
     }
   }
   await walk('')
-  return { dir, files, all: Object.values(files).join('\n') }
+  return { dir, files, all: encoding === null ? undefined : Object.values(files).join('\n') }
 }
 
 test('a pack built from a repo full of secrets contains none of them', async (t) => {
@@ -330,6 +333,9 @@ test('init writes a template and refuses to clobber an existing config', async (
   const template = await readFile(join(root, 'sparepack.yaml'), 'utf8')
   assert.match(template, /allowlist/)
   assert.match(template, /task:/)
+  assert.match(template, /remap:/)
+  assert.match(template, /first matching rule wins/)
+  assert.match(template, /stripPrefix is backward-compatible sugar/)
 
   const second = await cli(root, ['init'])
   assert.equal(second.code, 1)
@@ -346,6 +352,69 @@ test('the generated template is itself a valid config', async (t) => {
   assert.equal(config.task.length > 0, true)
   assert.equal(config.interfaces.length, 1)
   assert.equal(config.redact.length, 1)
+})
+
+test('remap applies overlapping rules in order and writes remapped manifest paths', async (t) => {
+  const root = await makeRepo()
+  t.after(() => rm(root, { recursive: true, force: true }))
+  await writeFile(join(root, 'src', 'shared.ts'), 'export const shared = true\n')
+
+  const config = `task: "Remap ordered source roots"
+remap:
+  - from: src/billing
+    to: lib
+  - from: src
+    to: source
+include:
+  - src/billing/types.ts
+  - src/shared.ts
+out: pack
+`
+  await writeFile(join(root, 'sparepack.yaml'), config)
+
+  const packed = await cli(root, ['pack', '--yes', '--no-color'])
+  assert.equal(packed.code, 0, `pack failed:\n${packed.stdout}\n${packed.stderr}`)
+
+  const { files } = await readPack(root)
+  assert.ok(files['lib/types.ts'], 'the more specific first rule should win')
+  assert.ok(files['source/shared.ts'], 'the later rule should still match another file')
+  assert.equal(files['source/billing/types.ts'], undefined)
+
+  const manifest = JSON.parse(await readFile(join(root, 'pack', 'MANIFEST.json'), 'utf8'))
+  assert.deepEqual(
+    manifest.files.map((file) => file.path).sort(),
+    ['lib/types.ts', 'source/shared.ts'],
+  )
+})
+
+test('stripPrefix and its single-rule remap form produce byte-identical packs', async (t) => {
+  const root = await makeRepo()
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const common = `task: "Publish billing types at the pack root"
+include:
+  - src/billing/types.ts
+`
+
+  await writeFile(
+    join(root, 'sparepack.yaml'),
+    `${common}stripPrefix: src/billing\nout: pack-strip\n`,
+  )
+  const stripped = await cli(root, ['pack', '--yes', '--no-color'])
+  assert.equal(stripped.code, 0, `stripPrefix pack failed:\n${stripped.stdout}\n${stripped.stderr}`)
+
+  await writeFile(
+    join(root, 'sparepack.yaml'),
+    `${common}remap:\n  - from: src/billing\n    to: ""\nout: pack-remap\n`,
+  )
+  const remapped = await cli(root, ['pack', '--yes', '--no-color'])
+  assert.equal(remapped.code, 0, `remap pack failed:\n${remapped.stdout}\n${remapped.stderr}`)
+
+  const stripFiles = (await readPack(root, 'pack-strip', null)).files
+  const remapFiles = (await readPack(root, 'pack-remap', null)).files
+  assert.deepEqual(Object.keys(remapFiles).sort(), Object.keys(stripFiles).sort())
+  for (const path of Object.keys(stripFiles)) {
+    assert.deepEqual(remapFiles[path], stripFiles[path], `${path} differs byte for byte`)
+  }
 })
 
 test('stripPrefix remaps destination paths and verifies cleanly', async (t) => {
@@ -405,7 +474,7 @@ out: pack
 
   const result = await cli(root, ['pack', '--yes'])
   assert.equal(result.code, 2)
-  assert.match(result.stderr, /"stripPrefix" pattern ".*" matched no files/)
+  assert.match(result.stderr, /"remap" pattern ".*" matched no files/)
 })
 
 test('stripPrefix collision is an error naming both paths', async (t) => {
@@ -434,7 +503,7 @@ out: pack
 
   const result = await cli(root, ['pack', '--yes'])
   assert.equal(result.code, 2)
-  assert.match(result.stderr, /destination path collision after stripPrefix/)
+  assert.match(result.stderr, /destination path collision after remap/)
   assert.match(result.stderr, /foo\.ts/)
   assert.match(result.stderr, /src\/billing\/foo\.ts/)
 })

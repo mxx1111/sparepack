@@ -14,7 +14,7 @@ import { compileCustomRule } from './scan.mjs'
 export const CONFIG_NAMES = ['sparepack.yaml', 'sparepack.yml']
 
 const FILE_KEYS = ['include', 'interfaces', 'tests']
-const KNOWN_KEYS = new Set([...FILE_KEYS, 'task', 'fixtures', 'redact', 'scanRules', 'allowFindings', 'out', 'stripPrefix'])
+const KNOWN_KEYS = new Set([...FILE_KEYS, 'task', 'fixtures', 'redact', 'scanRules', 'allowFindings', 'out', 'stripPrefix', 'remap'])
 
 class ConfigError extends Error {}
 
@@ -105,6 +105,31 @@ function parseStripPrefix(raw) {
   return prefix
 }
 
+/**
+ * Parse remap entries. Each entry must have `from` and `to` strings.
+ * Both values are validated against traversal and absoluteness.
+ * Order matters: first match wins at pack time.
+ */
+function parseRemap(raw) {
+  if (raw === undefined || raw === null) return []
+  if (!Array.isArray(raw)) fail('"remap" must be a list of {from, to} mappings')
+  return raw.map((entry, i) => {
+    if (typeof entry !== 'object' || entry === null) {
+      fail(`remap[${i}] must be a mapping with "from" and "to"`)
+    }
+    if (typeof entry.from !== 'string' || !entry.from.trim()) {
+      fail(`remap[${i}].from must be a non-empty string`)
+    }
+    if (typeof entry.to !== 'string') {
+      fail(`remap[${i}].to must be a string (use "" to strip the prefix entirely)`)
+    }
+    const from = validatePattern(entry.from.trim(), `remap[${i}].from`)
+    const to = entry.to.trim()
+    // `to` may be empty (strip), but if present it must be safe
+    if (to) validatePattern(to, `remap[${i}].to`)
+    return { from, to }
+  })
+}
 /** Parse config text. Separated from disk access so tests need no fixtures on disk. */
 export function parseConfig(text, { source = 'sparepack.yaml' } = {}) {
   let raw
@@ -128,6 +153,10 @@ export function parseConfig(text, { source = 'sparepack.yaml' } = {}) {
     fail(`unknown key(s) in ${source}: ${unknown.join(', ')} (prefix a key with "_" for notes)`)
   }
 
+  if (raw.stripPrefix !== undefined && raw.remap !== undefined) {
+    fail('"stripPrefix" and "remap" cannot both be set. Use "remap" only — stripPrefix is sugar for a single {from, to: ""} mapping.')
+  }
+
   if (typeof raw.task !== 'string' || !raw.task.trim()) {
     fail('"task" is required: one line saying what this pack is for. The worker reads it first.')
   }
@@ -136,6 +165,7 @@ export function parseConfig(text, { source = 'sparepack.yaml' } = {}) {
     task: raw.task.trim(),
     out: typeof raw.out === 'string' && raw.out.trim() ? raw.out.trim() : 'sparepack-out',
     stripPrefix: parseStripPrefix(raw.stripPrefix),
+    remap: parseRemap(raw.remap),
     include: asArray(raw.include, 'include').map((p) => validatePattern(p, 'include')),
     interfaces: asArray(raw.interfaces, 'interfaces').map((p) => validatePattern(p, 'interfaces')),
     tests: asArray(raw.tests, 'tests').map((p) => validatePattern(p, 'tests')),
@@ -148,6 +178,11 @@ export function parseConfig(text, { source = 'sparepack.yaml' } = {}) {
       }
       return entry
     }),
+  }
+
+  // Backward compatibility: convert stripPrefix to remap internally if remap is empty
+  if (config.stripPrefix && config.remap.length === 0) {
+    config.remap = [{ from: config.stripPrefix, to: '' }]
   }
 
   validatePattern(config.out, 'out')
